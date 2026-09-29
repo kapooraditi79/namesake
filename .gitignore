@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# run outputs — regenerable, not source
+results/*
+!results/.gitkeep
+
+# secrets
+.env
+
+# target repos cloned/checked out by the sandbox at run time
+sandbox_workdir/
