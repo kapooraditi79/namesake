@@ -1,0 +1,8 @@
+{
+  "id": "toy_001",
+  "issue": "calculate_discount(price, percent) returns the wrong value. Calling calculate_discount(100, 20) should return 80 (20% off), but it currently returns a negative number because `percent` is being used directly instead of being divided by 100 first.",
+  "repo_dir": "repo",
+  "test_command": "python -m pytest tests/ -q",
+  "expected_status_before_fix": "fail",
+  "expected_status_after_fix": "pass"
+}
