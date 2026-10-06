@@ -1,0 +1,8 @@
+{
+  "id": "toy_003",
+  "issue": "find_max(numbers) returns wrong value. it currently returns error value due to an issue in else branch.",
+  "repo_dir": "repo",
+  "test_command": "python -m pytest tests/ -q",
+  "expected_status_before_fix": "fail",
+  "expected_status_after_fix": "pass"
+}

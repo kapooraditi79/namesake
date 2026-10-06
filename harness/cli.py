@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from agents.dumb_agent import DumbAgent
 from agents.fake_agent import FakeAgent
 from harness.logger import TrajectoryLogger
 from harness.sandbox import LocalCopySandbox
@@ -15,6 +16,7 @@ from harness.scorer import score_run
 
 AGENTS = {
     "fake": FakeAgent,
+    "dumb": DumbAgent,
 }
 
 
