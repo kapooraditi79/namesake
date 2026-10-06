@@ -19,6 +19,11 @@ KNOWN_FIXES = {
         "file": "toy_calc/ops.py",
         "find": "return price - (price * percent)",
         "replace": "return price - (price * (percent / 100))",
+    },
+    "toy_002":{
+        "file": "toy_calc/ops.py",
+        "find": "for i in range (start, end):",
+        "replace": "for i in range (start, end+1):"
     }
 }
 

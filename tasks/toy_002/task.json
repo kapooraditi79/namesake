@@ -1,0 +1,8 @@
+{
+  "id": "toy_002",
+  "issue": "calculate_sum_to_n(start, end) returns the wrong value. Calling calculate_sum_to_n(40,45) should return 255, but it currently returns wrong value as it is not including the end number in the sum.",
+  "repo_dir": "repo",
+  "test_command": "python -m pytest tests/ -q",
+  "expected_status_before_fix": "fail",
+  "expected_status_after_fix": "pass"
+}
