@@ -4,3 +4,5 @@ __pycache__/
 venv/
 tasks/*/runs/
 *.egg-info/
+OFFLINE_TASKS.md
+PROJECT_CONTEXT.md
