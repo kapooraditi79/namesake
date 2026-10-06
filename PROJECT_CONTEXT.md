@@ -245,7 +245,73 @@ Each phase has a stated goal, concrete deliverables, and an **exit criterion** �
 
 ---
 
-## 13. Metrics That Matter (Don't Drown in Vanity Metrics)
+## 13a. Design Patterns Adopted From Prior Art (apply at Phase 1, not retrofitted into Phase 0)
+
+Source review of `SWE-bench/mini-swe-agent` (the team's own recommended successor
+to the original SWE-agent — ~190 lines, >74% on SWE-bench Verified) and
+`SWE-bench/SWE-bench` surfaced five concrete decisions to carry into the real
+`LLMAgent` build in Phase 1. These are **not** retrofitted into the current
+toy/`FakeAgent` code — `FakeAgent` has no loop, no cost, no multiple actions,
+so this scaffolding would be dead weight with nothing exercising it. Apply
+these when Phase 1 actually starts:
+
+1. **Three strictly separate components: Model, Environment, Agent.** The
+   agent never calls an LLM API or runs a command directly — only
+   `model.query()` and `env.execute()`. `harness/sandbox.py` already plays
+   the Environment role. Add a `Model` abstraction (thin wrapper: call LLM,
+   track cost/tokens, return a structured message) so swapping a local
+   open-weight model for an API model is a one-line change, not a rewrite.
+
+2. **One `execute_bash` action, not five bespoke tools.** Neither SWE-agent
+   nor mini-swe-agent gives the model separate `read_file`/`edit_file`/
+   `list_dir` tool definitions — they give it one action (run a shell
+   command) and let the model compose `cat`/`grep`/`sed`/`python -c` itself.
+   Simpler to implement, and it's what actually reaches SOTA. Shrink the
+   planned `LLMAgent` tool surface to this.
+
+3. **Every run ends through one uniform `exit_status`.** Limits exceeded,
+   repeated unparseable model output, an uncaught exception, or the model's
+   own "submit" — all funnel into the same structured exit record
+   (`exit_status`, `submission`). This *is* the failure taxonomy, captured
+   by construction instead of reconstructed later from logs. Extend
+   `harness/scorer.py`'s `RunScore` with an `exit_status` field once there
+   are real exit paths to distinguish (there's only one today: test
+   pass/fail).
+
+4. **Hard limits are config, not afterthoughts**: `step_limit`, `cost_limit`,
+   `wall_time_limit_seconds`, `max_consecutive_format_errors`, checked before
+   every model call. Add to `AgentConfig` once `LLMAgent` has an actual loop
+   to bound.
+
+5. **Trajectory flushes after every step**, not once at the end — so a
+   killed or crashed run still leaves an inspectable partial log. Change
+   `TrajectoryLogger` to flush incrementally once runs are long enough to
+   crash mid-way (not needed for the single-shot `FakeAgent`).
+
+## 13b. Future Scope (next project, not this one)
+
+Once this project's learning goals (Phases 0-5) are met, the natural next
+iteration is **Agent Evaluation Lab v2**: drop the hand-curated real-repo
+task suite and hand-rolled Docker sandboxing, and rebuild the task/sandbox
+layer on top of **SWE-bench-lite** instead (curated issues, verified test
+oracles, proven Docker harness — see swebench.com). Redirect all the effort
+currently spent on task curation and sandbox plumbing toward the
+genuinely-less-commoditized layer: multi-agent comparison, failure taxonomy
+depth, and the adaptive-recovery research question (Phase 5). This project's
+own Docker/task-curation work is still worth doing once, by hand, for the
+engineering understanding it forces — it just shouldn't be redone at
+real-repo scale a second time.
+
+## 13c. Attribution
+
+Design ideas in 13a are drawn from publicly available documentation and
+source of `SWE-bench/SWE-bench` and `SWE-bench/mini-swe-agent` (MIT
+licensed, Princeton/Stanford). No code was copied — these are architectural
+patterns, reimplemented independently.
+
+---
+
+## 14. Metrics That Matter (Don't Drown in Vanity Metrics)
 
 Track these, ignore the temptation to add more before you need them:
 
