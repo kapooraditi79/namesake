@@ -66,7 +66,7 @@ class LocalCopySandbox(Sandbox):
         repo_path = self._workdir / "repo"
         proc = subprocess.run(
             test_command,
-            shell=True,
+            shell=True, #Allows running arbitrary shell commands given as a string (like cd, ls, pipes, etc.)
             cwd=repo_path,
             capture_output=True,
             text=True,

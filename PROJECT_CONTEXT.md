@@ -322,3 +322,134 @@ Track these, ignore the temptation to add more before you need them:
 - **Failure category distribution** (only from Phase 4 onward, and only once you have real failures to categorize)
 
 Everything else (latency percentiles, fine-grained tool-call breakdowns, etc.) is a Phase 5+ nice-to-have, not a v1 requirement.
+
+## 15. Evaluation Architecture — The Full Pipeline
+
+A richer evaluation framework was reviewed against this project's actual
+state (toy tasks, no working `LLMAgent` yet). Most of it is correct and
+worth keeping as the target shape — but most of it is also **not** ready
+to implement today. Each piece below is tagged with when it actually
+applies. The discipline that matters here is the same one from §13a:
+write the good idea down, don't build it before something needs it.
+
+### 15a. The pipeline, and what each existing file actually covers
+
+```
+AGENT RUN
+    │
+    ▼
+Trajectory ──────────────┬──────────────── TestResult
+(behavioral data:        │                 (objective outcome:
+ tool calls, commands,   │                  tests before/after,
+ errors, iterations,     │                  regressions, hidden
+ tokens, duration)        │                 tests)
+    │                     │                     │
+    └──────────┬──────────┴─────────────────────┘
+               ▼
+            METRICS  (combines both streams)
+               │
+               ▼
+             SCORE
+```
+
+Mapping onto this repo as it exists today:
+- `TrajectoryLogger` → the Trajectory branch (behavioral data only).
+- `Sandbox.run_tests()` / `TestResult` → the TestResult branch (objective
+  outcome only).
+- `scorer.py`'s `score_run()` → **only consumes the TestResult branch**
+  today. It does not and should not read the trajectory log directly.
+- The **Metrics layer that merges both streams doesn't exist as its own
+  module yet** — `cli.py` currently hand-stitches one trajectory-derived
+  number (`step_count`) into `score_run()`. That's a fine shortcut at toy
+  scale. The honest target shape is a separate `metrics.py` that reads a
+  trajectory log + a `TestResult` pair and produces the full metrics
+  table below — build this once there's enough real data flowing through
+  the system that hand-stitching one field stops being enough (realistically,
+  once `LLMAgent` exists and actually produces tool-call counts, token
+  usage, and error counts worth aggregating).
+
+### 15b. Metrics table (target state, not all live yet)
+
+| Metric | What it tells you | Source | Status |
+|---|---|---|---|
+| Tests passed | Did the agent solve it? | TestResult | Live (`resolved`) |
+| Tests fixed / regressed | Did it improve or break things? | TestResult, per-test | **Gap** — needs per-test granularity (see 15e) |
+| Tool call count | How efficiently did it work? | Trajectory | Live (`step_count`), coarse |
+| Failed command count | How much did it struggle? | Trajectory | Not tracked — derivable once `LLMAgent` logs per-action success/failure |
+| Tokens used | How expensive was the run? | Trajectory, via Model | Not tracked — needs the `Model` wrapper from §13a |
+| Time taken | How efficient was it? | Trajectory | Live (`duration_seconds`) |
+| Trajectory length | How much wandering? | Trajectory | Derivable today (`len(logger.steps)`), just not surfaced in `RunScore` |
+| Final patch | What actually changed? | Sandbox diff | Not tracked — add once worth inspecting, i.e. once fixes aren't hardcoded strings |
+
+### 15c. `visible_to_agent` on trajectory events — documented, not coded
+
+Every `TrajectoryEvent` should conceptually carry whether the agent's own
+context window contained it. Right now this is redundant: `step_type`
+already implies it 1:1 (`agent_action` = visible, everything else = not).
+**Implement this the moment that 1:1 mapping breaks** — the likely trigger
+is `LLMAgent` running its own self-check tests as a bash action, which
+would produce a `test_run`-shaped event that *is* visible, indistinguishable
+by `step_type` alone from the harness's hidden grading `test_run`. Until
+that ambiguity actually exists, adding the field is speculative.
+
+### 15d. Reproducibility metadata — small addition, lands with the Model wrapper
+
+Once `Model` exists (§13a), log alongside each run: model name/version,
+temperature/config, prompt template version, task version, timestamp
+(already have this via `ts` and the run folder name). Don't build a
+separate "experiment config" system for this yet — a few extra fields on
+the `"start"` log event covers it until there's a real need for more.
+
+### 15e. Per-test granularity (regression detection) — real gap, deferred to realistic tasks
+
+`scorer.py` currently treats the whole test command as one boolean
+(pytest's single process returncode). This is fine for toy tasks (1-3
+tests, one file) but is a genuine limitation the moment tasks have many
+tests, because you can't distinguish "fixed the target bug" from "broke
+something else that was passing" — exactly SWE-bench's
+`FAIL_TO_PASS`/`PASS_TO_PASS` distinction. **Don't retrofit pytest-output
+parsing into toy tasks** — this gap is correctly resolved by the §13b
+pivot to SWE-bench-lite later, which already ships this distinction per
+task. Building your own per-test parser now would be duplicating
+infrastructure you're already planning to adopt rather than reinvent.
+
+### 15f. Baselines & failure analysis — already covered, just confirming
+
+Both of these are already in the roadmap (Phase 3 multi-agent comparison,
+Phase 4 failure taxonomy) and you've already executed a baseline
+comparison in practice (`dumb` vs `fake` on the toy suite). Nothing new
+to add here — this material just confirms the existing plan was right.
+
+### 15g. Multiple runs / pass@k / consistency — DEFERRED
+
+Stochastic LLM agents genuinely do need repeated-run statistics
+(pass@1, pass@k, variance) to be measured honestly instead of treating
+one run as ground truth. **Explicitly not built now.** This requires a
+working `LLMAgent` to repeat in the first place — build it after Phase 1
+produces one, likely as part of Phase 3's experiment runner.
+
+### 15h. Evaluator (judge) reliability — DEFERRED, further out than 15g
+
+Only relevant once an LLM-judge is introduced at all, which this project
+already treats as a last resort (§ "What this is NOT", and the scoring
+philosophy in the roadmap). No judge exists yet. Meta-evaluating a judge
+that doesn't exist isn't a task, it's a placeholder for a task.
+
+### 15i. Multi-dimensional scoring — already satisfied, keep doing this
+
+The warning against collapsing everything into one composite score is
+good and **already honored**: `RunScore` returns multiple independent
+fields (`resolved`, `before_passed`, `after_passed`, `duration_seconds`,
+`step_count`) rather than a single number. Keep extending it this way as
+new metrics land (15b) — resist ever reducing it to one "score" field,
+even when Phase 3's comparison report needs to rank agents; rank by
+multiple columns, don't average them into one number that hides tradeoffs.
+
+### 15j. "Experiment" as a first-class concept — formalizes Phase 3
+
+Phase 3 (multi-agent comparison) was already describing this informally.
+Worth adopting the sharper shape explicitly when Phase 3 is actually
+built: an `Experiment` = {task suite, list of agent configs, N runs each,
+fixed environment} → produces a comparison table, not just a single run's
+result. This is a naming/structure upgrade to apply **when Phase 3
+starts**, not a new piece of scope.
