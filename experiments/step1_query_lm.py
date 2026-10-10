@@ -16,13 +16,15 @@ client = OpenAI(
 
 
 def query_lm(messages: list[dict]) -> str:
+    # query the model and return the model msges
     response = client.chat.completions.create(model=MODEL, messages=messages)
     return response.choices[0].message.content
 
 
+TEXT= "what are qwen-2.5-coder-7b's benchmarks with agentic and coding tasks"
 if __name__ == "__main__":
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "In one sentence, what does the Python subprocess module do?"},
+        {"role": "user", "content": TEXT},
     ]
     print(query_lm(messages))

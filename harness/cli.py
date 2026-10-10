@@ -13,12 +13,16 @@ from agents.fake_agent import FakeAgent
 from harness.logger import TrajectoryLogger
 from harness.sandbox import LocalCopySandbox
 from harness.scorer import score_run
+from agents.lmAgentv1 import llmAgent
+
 
 AGENTS = {
     "fake": FakeAgent,
     "dumb": DumbAgent,
+    "lmagentv1": llmAgent
 }
 
+model= 'qwen-2.5-coder:7b'
 
 def run_task(task_dir: Path, agent_name: str) -> int:
     task = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
@@ -30,7 +34,10 @@ def run_task(task_dir: Path, agent_name: str) -> int:
     logger = TrajectoryLogger(run_dir / "trajectory.jsonl")
 
     agent_cls = AGENTS[agent_name]
-    agent = agent_cls()
+    if agent_cls!= 'lmagentv1':
+        agent = agent_cls()
+    else:
+        agent= agent_cls(model)
 
     start = time.time()
     logger.log("start", task_id=task["id"], agent=agent.name, issue=task["issue"])
