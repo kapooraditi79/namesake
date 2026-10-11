@@ -6,3 +6,5 @@ tasks/*/runs/
 *.egg-info/
 OFFLINE_TASKS.md
 PROJECT_CONTEXT.md
+HANDOFF.md
+HANDOFF.pdf

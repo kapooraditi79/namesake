@@ -4,25 +4,19 @@ Agents that never call a model (FakeAgent, DumbAgent) should keep
 inheriting directly from Agent -- this class exists so model/cost/step
 accounting lives in exactly one place, instead of every LLM-backed agent
 redeclaring it.
+
+Note on history: execute_action() used to manage a raw subprocess itself
+(Popen + poll + taskkill on hard timeout). That's gone -- the exact bug
+that logic hit (killing the host-side process doesn't kill what's running
+underneath it) reappears identically at the container boundary, so
+containment and timeout enforcement both moved to DockerSandbox, which
+solves it from the correct side (see harness/sandbox.py).
 """
-
-
-# killing of a process
-# proc.kill() only kills the cmd.exe shell on Windows,
-# not the actual command running underneath it as a grandchild process. 
-# I proved this by testing a genuinely hanging command: 
-# it took the full 10 seconds instead of stopping at the 2-second max_action_time.
-# Root cause: the orphaned grandchild kept the piped stdout/stderr open, 
-# so communicate() kept blocking on it. 
-# Fixed with taskkill /F /T /PID (/T = kill the whole tree),
 
 from __future__ import annotations
 
-import os
-import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from agents.base import Agent
 
@@ -72,76 +66,31 @@ class LLMBackedAgent(Agent):
         # line of act()/run(). See PROJECT_CONTEXT.md SS13a.
         self.start_time: float | None = None
 
-    def execute_action(self, command: str, cwd: Path) -> ActionResult:
-        """Run `command` inside `cwd`. Polls instead of blocking so a soft
-        flag can fire at min_action_time before a hard kill at
-        max_action_time (subprocess.run's single timeout can't do this --
-        it only ever gives you a hard kill at one value).
+    def execute_action(self, command: str, sandbox) -> ActionResult:
+        """Run `command` inside the task's container via `sandbox`.
+
+        Containment AND the hard timeout are the sandbox's job now --
+        DockerSandbox.exec_command enforces max_action_time with the
+        container's own `timeout` utility (see harness/sandbox.py). The
+        old approach here (host-side Popen + poll + taskkill) is gone --
+        it was solving a problem Docker now solves differently, and more
+        reliably, on the other side of the container boundary.
+
+        This method's only remaining job is the soft-flag bookkeeping,
+        which is agent-level, not something the sandbox should know about.
+        Checked after the fact (exec_command blocks until done or
+        hard-killed) rather than via live polling -- nothing consumes a
+        mid-run flag yet, so there's nothing to react to in real time.
         """
-        # subprocess.popen() lets us manage a running process. we can interact with it
-        # subprocess.rn will rather wait for the entire run to get completed 
         start = time.time()
-        proc = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=cwd,
-            stdout=subprocess.PIPE, # capture output.
-            stderr=subprocess.PIPE, # .PIPE creates a channel between my python process and the output returned
-            text=True,
+        result = sandbox.exec_command(command, timeout=self.max_action_time)
+        elapsed = time.time() - start
+
+        status = check_time_flag(elapsed, self.min_action_time, self.max_action_time)
+        return ActionResult(
+            stdout=result.stdout,
+            stderr=result.stderr,
+            returncode=result.returncode,
+            timed_out=result.timed_out,
+            soft_flagged=(status in ("soft_flag", "hard_timeout")),
         )
-
-        soft_flagged = False
-        poll_interval = 0.5 # what is this??
-        while True:
-            try:
-                # communicating with the running process
-                stdout, stderr = proc.communicate(timeout=poll_interval)
-                # if the timeout expires, it does not automatically shut it.
-                # we get to manage it since its a popen, and manage it as an exception
-                return ActionResult(
-                    stdout=stdout,
-                    stderr=stderr,
-                    returncode=proc.returncode,
-                    timed_out=False,
-                    soft_flagged=soft_flagged,
-                )
-            except subprocess.TimeoutExpired:
-                elapsed = time.time() - start
-                status = check_time_flag(elapsed, self.min_action_time, self.max_action_time)
-                if status == "hard_timeout":
-                    # proc.kill() only kills the shell (shell=True spawns
-                    # cmd.exe as the direct child) -- the actual command
-                    # runs as a grandchild and survives, keeping the piped
-                    # stdout/stderr open so communicate() below would hang
-                    # until THAT process finishes on its own. Confirmed by
-                    # reproducing it: killed at 2s, communicate() still
-                    # didn't return until 10s. taskkill /T kills the whole
-                    # tree, not just the top PID.
-
-                    # windows
-                    if os.name == "nt":
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                            capture_output=True,
-                        ) 
-                                # - taskkill terminates processes by PID.
-                                # - /F forces termination.
-                                # - /T terminates the process and its child processes.
-                                # - /PID specifies the process ID (proc.pid).
-                                # - capture_output=True captures the command's output instead of printing it.
-                    else:
-                        proc.kill()
-                    stdout, stderr = proc.communicate()
-                    return ActionResult(
-                        stdout=stdout,
-                        stderr=stderr,
-                        returncode=proc.returncode,
-                        timed_out=True,
-                        soft_flagged=soft_flagged,
-                    )
-                if status == "soft_flag":
-                    # Nothing consumes this yet (no logger passed in here --
-                    # by design, see the earlier discussion on what this
-                    # method needs access to). Flag is still returned on
-                    # ActionResult so it's not silently lost.
-                    soft_flagged = True

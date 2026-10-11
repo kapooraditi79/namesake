@@ -15,6 +15,7 @@ class llmAgent(LLMBackedAgent):
         super().__init__(model=model)
         self.messages: list[dict] = []
 
-    def act(self, repo_path: Path, task: dict[str, Any], logger: TrajectoryLogger) -> int:
+    def act(self, repo_path: Path, task: dict[str, Any], logger: TrajectoryLogger, sandbox=None) -> int:
         self.start_time = time.time()
+        self.sandbox = sandbox  # execute_action() needs this to call sandbox.exec_command()
         raise NotImplementedError  # the actual loop -- still yours to build
